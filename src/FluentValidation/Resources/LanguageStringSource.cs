@@ -35,8 +35,5 @@ namespace FluentValidation.Resources {
 		public string GetString(IValidationContext context) {
 			return ValidatorOptions.LanguageManager.GetString(_key);
 		}
-
-		public string ResourceName => _key;
-		public Type ResourceType => typeof(LanguageManager);
 	}
 }

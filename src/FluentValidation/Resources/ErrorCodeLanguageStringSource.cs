@@ -41,8 +41,5 @@ namespace FluentValidation.Resources {
 			
 			return string.IsNullOrEmpty(result) ? _inner.GetString(context) : result;
 		}
-
-		public string ResourceName => _errorCodeFunc(null) ?? _inner.ResourceName; // null is ok here as LanguageStringSource doesn't use context.
-		public Type ResourceType => typeof(LanguageManager);
 	}
 }
