@@ -17,6 +17,7 @@
 #endregion
 namespace FluentValidation.Resources {
 	using System;
+	using System.Collections.Concurrent;
 	using System.Collections.Generic;
 	using System.Globalization;
 	using Validators;
@@ -25,54 +26,62 @@ namespace FluentValidation.Resources {
 	/// Allows the default error message translations to be managed.
 	/// </summary>
 	public class LanguageManager : ILanguageManager {
-		private readonly Dictionary<string, Language> _languages = new Dictionary<string, Language>();
-		private Language _fallback;
+		private readonly ConcurrentDictionary<string, Language> _languages;
+		private readonly Language _fallback = new EnglishLanguage();
 
 		/// <summary>
 		/// Creates a new instance of the LanguageManager class.
 		/// </summary>
 		public LanguageManager() {
-			var languages = new Language[] {
-				new EnglishLanguage(),
-				new ChineseSimplifiedLanguage(),
-				new ChineseTraditionalLanguage(),
-				new CroatianLanguage(),
-				new CzechLanguage(),
-				new DanishLanguage(),
-				new DutchLanguage(),
-				new FinnishLanguage(),
-				new FrenchLanguage(),
-				new GermanLanguage(),
-				new GeorgianLanguage(),
-				new HebrewLanguage(),
-				new HindiLanguage(),
-				new ItalianLanguage(),
-				new KoreanLanguage(),
-				new MacedonianLanguage(),
-				new PersianLanguage(),
-				new PolishLanguage(),
-				new PortugueseLanguage(),
-				new PortugueseBrazilLanguage(),
-				new RomanianLanguage(),
-				new RussianLanguage(),
-				new SlovakLanguage(),
-				new SpanishLanguage(),
-				new SwedishLanguage(),
-				new TurkishLanguage(),
-				new UkrainianLanguage(),
-				new ArabicLanguage(),
-				new AlbanianLanguage(),
-				new GreekLanguage(),
-				new NorwegianBokmalLanguage(),
-				new JapaneseLanguage(),
-			};
-
-			foreach (var language in languages) {
-				_languages[language.Name] = language;
-			}
-
-			_fallback = _languages["en"];
+			// Initialize with English as the default. Others will be lazily loaded as needed.
+			_languages = new ConcurrentDictionary<string, Language>(new[] {
+				new KeyValuePair<string, Language>(EnglishLanguage.Culture, _fallback),
+			});
 		}
+		
+		/// <summary>
+		/// Language factory.
+		/// </summary>
+		/// <param name="culture">The culture code.</param>
+		/// <returns>The corresponding Language instance or null.</returns>
+		private static Language CreateLanguage(string culture) {
+			switch (culture) {
+				case EnglishLanguage.Culture: return new EnglishLanguage();
+				case AlbanianLanguage.Culture: return new AlbanianLanguage();
+				case ArabicLanguage.Culture: return new ArabicLanguage();
+				case ChineseSimplifiedLanguage.Culture: return new ChineseSimplifiedLanguage();
+				case ChineseTraditionalLanguage.Culture: return new ChineseTraditionalLanguage();
+				case CroatianLanguage.Culture: return new CroatianLanguage();
+				case CzechLanguage.Culture: return new CzechLanguage();
+				case DanishLanguage.Culture: return new DanishLanguage();
+				case DutchLanguage.Culture: return new DutchLanguage();
+				case FinnishLanguage.Culture: return new FinnishLanguage();
+				case FrenchLanguage.Culture: return new FrenchLanguage();
+				case GermanLanguage.Culture: return new GermanLanguage();
+				case GeorgianLanguage.Culture: return new GeorgianLanguage();
+				case GreekLanguage.Culture: return new GreekLanguage();
+				case HebrewLanguage.Culture: return new HebrewLanguage();
+				case HindiLanguage.Culture: return new HindiLanguage();
+				case ItalianLanguage.Culture: return new ItalianLanguage();
+				case JapaneseLanguage.Culture: return new JapaneseLanguage();
+				case KoreanLanguage.Culture: return new KoreanLanguage();
+				case MacedonianLanguage.Culture: return new MacedonianLanguage();
+				case NorwegianBokmalLanguage.Culture: return new NorwegianBokmalLanguage();
+				case PersianLanguage.Culture: return new PersianLanguage();
+				case PolishLanguage.Culture: return new PolishLanguage();
+				case PortugueseLanguage.Culture: return new PortugueseLanguage();
+				case PortugueseBrazilLanguage.Culture: return new PortugueseBrazilLanguage();
+				case RomanianLanguage.Culture: return new RomanianLanguage();
+				case RussianLanguage.Culture: return new RussianLanguage();
+				case SlovakLanguage.Culture: return new SlovakLanguage();
+				case SpanishLanguage.Culture: return new SpanishLanguage();
+				case SwedishLanguage.Culture: return new SwedishLanguage();
+				case TurkishLanguage.Culture: return new TurkishLanguage();
+				case UkrainianLanguage.Culture: return new UkrainianLanguage();
+				default: return null;
+			}
+		}
+
 
 		/// <summary>
 		/// Whether localization is enabled.
@@ -83,15 +92,6 @@ namespace FluentValidation.Resources {
 		/// Default culture to use for all requests to the LanguageManager. If not specified, uses the current UI culture.
 		/// </summary>
 		public CultureInfo Culture { get; set; }
-
-		/// <summary>
-		/// Provides a collection of all supported languages.
-		/// </summary>
-		/// <returns></returns>
-		public IEnumerable<string> GetSupportedLanguages() {
-			return _languages.Keys;
-		}
-
 
 		/// <summary>
 		/// Removes all languages except the default.
@@ -110,23 +110,34 @@ namespace FluentValidation.Resources {
 		public virtual string GetString(string key, CultureInfo culture=null) {
 			culture = culture ?? Culture ?? CultureInfo.CurrentUICulture;
 
-			string code = culture.Name;
-
-			if (!culture.IsNeutralCulture && !_languages.ContainsKey(code)) {
-				code = culture.Parent.Name;
-			}
-
-			var languageToUse = Enabled && _languages.ContainsKey(code)
-				? _languages[code]
-				: _fallback;
-
+			var languageToUse = GetCachedLanguage(culture);
 			string value = languageToUse.GetTranslation(key);
 
+			// Selected language is missing a translation for this key - fall back to English translation. 
 			if (string.IsNullOrEmpty(value) && languageToUse != _fallback) {
 				value = _fallback.GetTranslation(key);
 			}
 
 			return value ?? string.Empty;
+		}
+
+		private Language GetCachedLanguage(CultureInfo culture) {
+			// If the language manager is enabled, try and find matching translations.
+			if (Enabled) {
+				var languageToUse = _languages.GetOrAdd(culture.Name, CreateLanguage);
+
+				// If we couldn't find translations for this culture, and it's not a neutral culture
+				// then try and find translations for the parent culture instead.
+				if (languageToUse == null && !culture.IsNeutralCulture) {
+					languageToUse = _languages.GetOrAdd(culture.Parent.Name, CreateLanguage);
+				}
+
+				if (languageToUse != null) {
+					return languageToUse;
+				}
+			}
+
+			return _fallback;
 		}
 
 		public IEnumerable<string> GetSupportedTranslationKeys() {
@@ -143,7 +154,7 @@ namespace FluentValidation.Resources {
 			}
 
 			_languages[language].Translate(key, message);
-
 		}
+
 	}
 }
